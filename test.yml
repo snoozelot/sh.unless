@@ -1,0 +1,35 @@
+---
+- name: test sh.unless module
+  hosts: localhost
+  connection: local
+  gather_facts: no
+
+  tasks:
+    - name: setup test directory
+      file:
+        path: /tmp/sh-unless-test-target
+        state: directory
+
+    - name: ensure directory symlink (first run - creates link)
+      sh.unless:
+        state: directory-link
+        link: /tmp/sh-unless-test-link
+        target: /tmp/sh-unless-test-target
+        unless_state: test -L "${link}" && test "$(readlink "${link}")" = "${target}"
+        unless_then: ln -sfn "${target}" "${link}"
+
+    - name: ensure directory symlink (second run - idempotent)
+      sh.unless:
+        state: directory-link
+        link: /tmp/sh-unless-test-link
+        target: /tmp/sh-unless-test-target
+        unless_state: test -L "${link}" && test "$(readlink "${link}")" = "${target}"
+        unless_then: ln -sfn "${target}" "${link}"
+
+    - name: cleanup
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /tmp/sh-unless-test-link
+        - /tmp/sh-unless-test-target
