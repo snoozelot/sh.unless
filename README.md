@@ -33,7 +33,7 @@ changed: [localhost] =>
     changed: true
     state: directory-link
     unless_state: test -L "/tmp/sh-unless-test-link" && test "$(readlink "/tmp/sh-unless-test-link")" = "/tmp/sh-unless-test-target"
-    unless_state_rc: 0
+    unless_state_rc: 1
     unless_then_log: + ln -sfn /tmp/sh-unless-test-target /tmp/sh-unless-test-link
 
 TASK [ensure directory symlink (second run - idempotent)]

@@ -137,15 +137,18 @@ changed=false
 
 if [ "${_ansible_check_mode}" != "True" ] && [ $state_rc -ne 0 ]; then
     action_log=$(run_action)
-    state_log=$(run_state)
-    state_rc=$?
+    verify_log=$(run_state)
+    verify_rc=$?
     changed=true
 fi
 
 # --- json output -------------------------------------------------------------
 
+exit_rc=$state_rc
+[ "$changed" = true ] && exit_rc=$verify_rc
+
 printf '{"changed":%s'         "$changed"
-printf ',"failed":';           to_json_bool [ $state_rc -ne 0 ]
+printf ',"failed":';           to_json_bool [ $exit_rc -ne 0 ]
 printf ',"unless_state_rc":%s' "$state_rc"
 
 [ -n "${state}" ]     && { printf ',"state":';            printf '%s' "$state"        | to_json_string; }
@@ -154,4 +157,4 @@ printf ',"unless_state_rc":%s' "$state_rc"
 [ "$changed" = true ] && { printf ',"unless_then_log":';  printf '%s' "$action_log"   | to_json_string; }
 
 printf '}'
-exit $state_rc
+exit $exit_rc
