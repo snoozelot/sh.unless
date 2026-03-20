@@ -1,0 +1,157 @@
+#!/bin/sh
+# sh.unless - idempotent shell commands for Ansible
+#
+# Ansible's shell module lacks idempotence guards. This module adds them:
+# run a check, and only act if the check fails.
+#
+# This implements idempotent resource management in its most general form:
+# check state, fix if wrong, verify. In principle, this can replace any
+# Ansible module — every module is just a specialized check/fix pair.
+#
+# How it works:
+#   1. Run unless_state to check current state
+#   2. If check fails (rc != 0), run unless_then to fix it
+#   3. Re-run unless_state to verify
+#   4. Return JSON result to Ansible
+#
+# Usage:
+#
+#     - sh.unless:
+#         state:  directory-link
+#         link:   /app/current
+#         target: /app/v1.0
+#         unless_state: test -L "${link}" && test "$(readlink "${link}")" = "${target}"
+#         unless_then:  ln -sfn "${target}" "${link}"
+#
+#   `state` plus variables = interface. Scripts = implementation.
+#   Why `state` and variables instead of just scripts?
+#
+#   1. Readable: `state: directory-link, link: /app/current` tells you what's
+#      managed without reading the shell code.
+#
+#   2. Reusable: same scripts, different variables — no copy-paste.
+#        - sh.unless: { state: directory-link, link: /app/current, target: /v1, <<: *dirlink }
+#        - sh.unless: { state: directory-link, link: /web/current, target: /v2, <<: *dirlink }
+#
+#   3. Replaceable: if someone writes a native `directory_link` module later,
+#      your variables become its parameters. Delete the scripts, done.
+#
+#
+# Parameters:
+#   unless_state  - check script (default: true)
+#   unless_then   - action script (default: true)
+#   unless_shell  - interpreter (default: /bin/sh, also: bash, ruby, python)
+#   state         - optional label for JSON output
+#
+# Notes:
+#   - Honors Ansible check mode (skips unless_then)
+#   - Custom variables (like ${link}) are passed through and expanded
+#   - unless_state and unless_then are separate runs; to share: eval "${unless_state}" in unless_then
+#   - Non-shell interpreters (ruby, python) work if they read stdin
+#
+# Portability:
+#   - POSIX /bin/sh (no bashisms)
+#   - BSD sed compatible (no GNU extensions)
+#   - NUL bytes stripped (can't exist in JSON strings)
+#
+# Dependencies:
+#   - sed, tr (POSIX, BSD compatible)
+#   - envsubst (gettext)
+#
+# References:
+#   - https://docs.ansible.com/ansible/latest/collections/ansible/builtin/shell_module.html
+#   - https://github.com/itamae-kitchen/itamae/wiki/Resources
+
+set +x  # no command tracing
+set -a  # export all variables to subprocesses
+set -e  # exit on error
+
+# --- helpers -----------------------------------------------------------------
+
+is_posix_shell () {
+    case "$1" in
+    */sh|*/bash|*/ksh|*/zsh|*/dash|*/ash) return 0 ;;
+    *) return 1 ;;
+    esac
+}
+
+has_pipefail () {
+    case "$1" in
+    */bash|*/ksh|*/zsh) return 0 ;;
+    *) return 1 ;;
+    esac
+}
+
+to_json_string () {
+    # RFC 7159: escape \, ", and control chars U+0000-U+001F
+    # Uses printf for literal bytes (BSD sed compatible)
+    script='s,\\,\\\\,g;s,",\\",g;'
+    for n in 1 2 3 4 5 6 7 8 9 11 12 13 14 15 \
+             16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31; do
+        c=$(printf "\\$(printf '%03o' $n)")
+        case $n in
+            9)  script="${script}s,$c,\\\\t,g;" ;;
+            13) script="${script}s,$c,\\\\r,g;" ;;
+            *)  script="${script}s,$c,$(printf '\\\\u%04X' $n),g;" ;;
+        esac
+    done
+    SOH=$(printf '\001')
+    printf '"'
+    tr -d '\000' | sed -e "$script" | tr '\012' '\001' | sed -e "s,$SOH,\\\\n,g"
+    printf '"'
+}
+
+to_json_bool () {
+    "$@" && printf 'true' || printf 'false'
+}
+
+state_script () {
+    if is_posix_shell "${unless_shell}"; then
+        has_pipefail "${unless_shell}" && printf 'set -o pipefail\n'
+        printf 'set +x\n'
+    fi
+    printf '%s\n' "${unless_state}"
+}
+
+action_script () {
+    if is_posix_shell "${unless_shell}"; then
+        has_pipefail "${unless_shell}" && printf 'set -o pipefail\n'
+        printf 'set -x\n'
+    fi
+    printf '%s\n' "${unless_then}"
+}
+
+run_state ()  { state_script  | "${unless_shell}" 2>&1; }
+run_action () { action_script | "${unless_shell}" 2>&1; }
+
+# --- main --------------------------------------------------------------------
+
+. "${1}"  # source ansible parameters
+
+: ${unless_shell:=/bin/sh}
+: ${unless_state:=true}
+: ${unless_then:=true}
+
+state_log=$(run_state) && state_rc=0 || state_rc=$?
+changed=false
+
+if [ "${_ansible_check_mode}" != "True" ] && [ $state_rc -ne 0 ]; then
+    action_log=$(run_action)
+    state_log=$(run_state)
+    state_rc=$?
+    changed=true
+fi
+
+# --- json output -------------------------------------------------------------
+
+printf '{"changed":%s'         "$changed"
+printf ',"failed":';           to_json_bool [ $state_rc -ne 0 ]
+printf ',"unless_state_rc":%s' "$state_rc"
+
+[ -n "${state}" ]     && { printf ',"state":';            printf '%s' "$state"        | to_json_string; }
+                         { printf ',"unless_state":';     printf '%s' "$unless_state" | envsubst | to_json_string; }
+[ -n "${state_log}" ] && { printf ',"unless_state_log":'; printf '%s' "$state_log"    | to_json_string; }
+[ "$changed" = true ] && { printf ',"unless_then_log":';  printf '%s' "$action_log"   | to_json_string; }
+
+printf '}'
+exit $state_rc
