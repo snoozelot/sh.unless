@@ -66,23 +66,32 @@ set +x  # no command tracing
 set -a  # export all variables to subprocesses
 set -e  # exit on error
 
+# --- predicates --------------------------------------------------------------
+
+got() { [ -n "$1" ]; }
+
+not_check_mode() { [ "${_ansible_check_mode}" != "True" ]; }
+state_failed()   { [ "$state_rc" -ne 0 ]; }
+failed()         { [ "$exit_rc" -ne 0 ]; }
+changed()        { [ "$changed" = true ]; }
+
 # --- helpers -----------------------------------------------------------------
 
-is_posix_shell () {
+is_posix_shell() {
     case "$1" in
     */sh|*/bash|*/ksh|*/zsh|*/dash|*/ash) return 0 ;;
     *) return 1 ;;
     esac
 }
 
-has_pipefail () {
+has_pipefail() {
     case "$1" in
     */bash|*/ksh|*/zsh) return 0 ;;
     *) return 1 ;;
     esac
 }
 
-to_json_string () {
+to_json_string() {
     # RFC 7159: escape \, ", and control chars U+0000-U+001F
     # Uses printf for literal bytes (BSD sed compatible)
     script='s,\\,\\\\,g;s,",\\",g;'
@@ -101,60 +110,66 @@ to_json_string () {
     printf '"'
 }
 
-to_json_bool () {
+to_json_bool() {
     "$@" && printf 'true' || printf 'false'
 }
 
-state_script () {
-    if is_posix_shell "${unless_shell}"; then
-        has_pipefail "${unless_shell}" && printf 'set -o pipefail\n'
-        printf 'set +x\n'
-    fi
-    printf '%s\n' "${unless_state}"
+shell_preamble() {
+    trace=$1
+
+    is_posix_shell "${unless_shell}" || return 0
+    has_pipefail "${unless_shell}" && printf 'set -o pipefail\n'
+    printf 'set %s\n' "$trace"
 }
 
-action_script () {
-    if is_posix_shell "${unless_shell}"; then
-        has_pipefail "${unless_shell}" && printf 'set -o pipefail\n'
-        printf 'set -x\n'
-    fi
-    printf '%s\n' "${unless_then}"
-}
+state_script()  { shell_preamble +x; printf '%s\n' "${unless_state}"; }
+action_script() { shell_preamble -x; printf '%s\n' "${unless_then}"; }
 
-run_state ()  { state_script  | "${unless_shell}" 2>&1; }
-run_action () { action_script | "${unless_shell}" 2>&1; }
+run_state()  { state_script  | "${unless_shell}" 2>&1; }
+run_action() { action_script | "${unless_shell}" 2>&1; }
 
 # --- main --------------------------------------------------------------------
 
-. "${1}"  # source ansible parameters
+main() {
+    . "${1}"  # source ansible parameters
 
-: ${unless_shell:=/bin/sh}
-: ${unless_state:=true}
-: ${unless_then:=true}
+    : ${unless_shell:=/bin/sh}
+    : ${unless_state:=true}
+    : ${unless_then:=true}
 
-state_log=$(run_state) && state_rc=0 || state_rc=$?
-changed=false
+    state_log=$(run_state) && state_rc=0 || state_rc=$?
+    changed=false
 
-if [ "${_ansible_check_mode}" != "True" ] && [ $state_rc -ne 0 ]; then
-    action_log=$(run_action)
-    verify_log=$(run_state)
-    verify_rc=$?
-    changed=true
-fi
+    if not_check_mode && state_failed; then
+        action_log=$(run_action)
+        verify_log=$(run_state)
+        verify_rc=$?
+        changed=true
+    fi
 
-# --- json output -------------------------------------------------------------
+    exit_rc=$state_rc
+    changed && exit_rc=$verify_rc
 
-exit_rc=$state_rc
-[ "$changed" = true ] && exit_rc=$verify_rc
+    output_json
+    exit $exit_rc
+}
 
-printf '{"changed":%s'         "$changed"
-printf ',"failed":';           to_json_bool [ $exit_rc -ne 0 ]
-printf ',"unless_state_rc":%s' "$state_rc"
+output_json() {
+    printf '{"changed":%s'         "$changed"
+    printf ',"failed":';           to_json_bool failed
+    printf ',"unless_state_rc":%s' "$state_rc"
 
-[ -n "${state}" ]     && { printf ',"state":';            printf '%s' "$state"        | to_json_string; }
-                         { printf ',"unless_state":';     printf '%s' "$unless_state" | envsubst | to_json_string; }
-[ -n "${state_log}" ] && { printf ',"unless_state_log":'; printf '%s' "$state_log"    | to_json_string; }
-[ "$changed" = true ] && { printf ',"unless_then_log":';  printf '%s' "$action_log"   | to_json_string; }
+    got "$state"      && json_field state        "$state"
+                         json_field unless_state "$(printf '%s' "$unless_state" | envsubst)"
+    got "$state_log"  && json_field unless_state_log "$state_log"
+    changed           && json_field unless_then_log  "$action_log"
 
-printf '}'
-exit $exit_rc
+    printf '}'
+}
+
+json_field() {
+    printf ',"%s":' "$1"
+    printf '%s' "$2" | to_json_string
+}
+
+main "$@"
