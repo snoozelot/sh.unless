@@ -12,6 +12,6 @@ Work it out yourselves.
 Nobody owes you anything, not even a reply.
 
 We don't mandate politeness.
-But you probably won't get far by insulting others — practical wisdom, not a rule.
+But you won't get far by insulting others — practical wisdom, not a rule.
 
 Don't like it? Fork it!
