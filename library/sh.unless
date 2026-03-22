@@ -17,21 +17,21 @@
 # Usage:
 #
 #     - sh.unless:
-#         state:  directory-link
-#         link:   /app/current
-#         target: /app/v1.0
-#         unless_state: test -L "${link}" && test "$(readlink "${link}")" = "${target}"
-#         unless_then:  ln -sfn "${target}" "${link}"
+#         state:      directory-link
+#         file:       /app/current
+#         linktarget: /app/releases/initial
+#         unless_state: test -L "${file}" && test -d "${file}/"
+#         unless_then:  rm -rf "${file}" && ln -s "${linktarget}" "${file}"
 #
 #   `state` plus variables = interface. Scripts = implementation.
 #   Why `state` and variables instead of just scripts?
 #
-#   1. Readable: `state: directory-link, link: /app/current` tells you what's
+#   1. Readable: `state: directory-link, file: /app/current` tells you what's
 #      managed without reading the shell code.
 #
 #   2. Reusable: same scripts, different variables — no copy-paste.
-#        - sh.unless: { state: directory-link, link: /app/current, target: /v1, <<: *dirlink }
-#        - sh.unless: { state: directory-link, link: /web/current, target: /v2, <<: *dirlink }
+#        - sh.unless: { state: directory-link, file: /app/current, linktarget: /v1, <<: *dirlink }
+#        - sh.unless: { state: directory-link, file: /web/current, linktarget: /v2, <<: *dirlink }
 #
 #   3. Replaceable: if someone writes a native `directory_link` module later,
 #      your variables become its parameters. Delete the scripts, done.
@@ -45,7 +45,7 @@
 #
 # Notes:
 #   - Honors Ansible check mode (skips unless_then)
-#   - Custom variables (like ${link}) are passed through and expanded
+#   - Custom variables (like ${file} and ${linktarget}) are passed through and expanded
 #   - unless_state and unless_then are separate runs; to share: eval "${unless_state}" in unless_then
 #   - Non-shell interpreters (ruby, python) work if they read stdin
 #

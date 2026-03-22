@@ -13,23 +13,23 @@
     - name: ensure directory symlink (first run - creates link)
       sh.unless:
         state: directory-link
-        link: /tmp/sh-unless-test-link
-        target: /tmp/sh-unless-test-target
-        unless_state: test -L "${link}" && test "$(readlink "${link}")" = "${target}"
-        unless_then: ln -sfn "${target}" "${link}"
+        file: /tmp/sh-unless-test-file
+        linktarget: /tmp/sh-unless-test-target
+        unless_state: test -L "${file}" && test -d "${file}/"
+        unless_then: rm -rf "${file}" && ln -s "${linktarget}" "${file}"
 
     - name: ensure directory symlink (second run - idempotent)
       sh.unless:
         state: directory-link
-        link: /tmp/sh-unless-test-link
-        target: /tmp/sh-unless-test-target
-        unless_state: test -L "${link}" && test "$(readlink "${link}")" = "${target}"
-        unless_then: ln -sfn "${target}" "${link}"
+        file: /tmp/sh-unless-test-file
+        linktarget: /tmp/sh-unless-test-target
+        unless_state: test -L "${file}" && test -d "${file}/"
+        unless_then: rm -rf "${file}" && ln -s "${linktarget}" "${file}"
 
     - name: cleanup
       file:
         path: "{{ item }}"
         state: absent
       loop:
-        - /tmp/sh-unless-test-link
+        - /tmp/sh-unless-test-file
         - /tmp/sh-unless-test-target
