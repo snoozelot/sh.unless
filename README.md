@@ -1,10 +1,12 @@
 # sh.unless
 
-Idempotent shell commands for Ansible.
+Ansible's shell module lacks idempotence guards — commands aren't safe to
+repeat and `--check` mode can break your system. This module adds them:
+run a check and only act if it fails.
 
-Ansible's `shell` module runs every time, which breaks `--check` mode and fails when commands aren't safe to repeat — `mkdir` on an existing directory, `ln` creating nested links.
-
-This module runs the script in `unless_state` and only runs `unless_then` if the check fails. Every Ansible module is a specialized check/fix pair — this makes the pattern explicit. The module supports check mode and non-shell interpreters (ruby, python).
+Ansible modules are specialized check/fix pairs — this makes the pattern
+explicit. The module supports `--check` mode and non-shell interpreters
+(ruby, python).
 
 ```yaml
 - sh.unless:
