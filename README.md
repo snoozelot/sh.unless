@@ -4,8 +4,8 @@ Ansible's shell module lacks idempotence guards — commands aren't safe to
 repeat and `--check` mode can break your system. This module adds them:
 run a check and only act if it fails.
 
-In principle, this can replace any Ansible module — every module is just
-a specialized check/fix pair. Supports `--check` mode and non-shell
+Every Ansible module is a specialized check/fix pair — sh.unless just
+makes the pattern reusable. Supports `--check` mode and non-shell
 interpreters (ruby, python).
 
 ```yaml
